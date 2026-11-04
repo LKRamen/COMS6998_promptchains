@@ -1,0 +1,17 @@
+import {beforeEach,expect,it,vi} from "vitest";
+const mocks=vi.hoisted(()=>({session:vi.fn(),rpc:vi.fn(),storage:vi.fn(),download:vi.fn()}));
+vi.mock("../lib/auth",()=>({adminSession:mocks.session,AccessError:class extends Error{constructor(public status:number,message:string){super(message);}}}));
+vi.mock("../lib/supabase",()=>({storageClient:mocks.storage}));
+import {AccessError} from "../lib/auth";
+import {GET} from "../app/api/media/[id]/route";
+const id="11111111-1111-4111-8111-111111111111";
+const record={id,status:"succeeded",input_path:"actor/run/input.jpg",output_paths:["actor/run/output-1.jpg","actor/run/output-2.jpg"]};
+const params=(value=id)=>({params:Promise.resolve({id:value})});
+const request=(query="")=>new Request(`https://chains.example/api/media/${id}${query}`);
+beforeEach(()=>{vi.resetAllMocks();mocks.session.mockResolvedValue({client:{rpc:mocks.rpc}});mocks.rpc.mockResolvedValue({data:{rows:[record]},error:null});mocks.storage.mockReturnValue({storage:{from:()=>({download:mocks.download})}});mocks.download.mockResolvedValue({data:new Blob(["jpeg-bytes"]),error:null});});
+it.each([401,403])("denies media access before any storage lookup (%s)",async(status)=>{mocks.session.mockRejectedValue(new AccessError(status,"Denied"));expect((await GET(request(),params())).status).toBe(status);expect(mocks.rpc).not.toHaveBeenCalled();expect(mocks.storage).not.toHaveBeenCalled();});
+it("rejects malformed IDs, unknown runs and unfinished runs",async()=>{expect((await GET(request(),params("bad"))).status).toBe(404);expect(mocks.rpc).not.toHaveBeenCalled();mocks.rpc.mockResolvedValueOnce({data:{rows:[]},error:null});expect((await GET(request(),params())).status).toBe(404);mocks.rpc.mockResolvedValueOnce({data:{rows:[{...record,status:"pending"}]},error:null});expect((await GET(request(),params())).status).toBe(404);expect(mocks.storage).not.toHaveBeenCalled();});
+it.each(["?index=-1","?index=2","?index=1.5","?index=NaN"])("rejects invalid output indexes: %s",async(query)=>{expect((await GET(request(query),params())).status).toBe(404);expect(mocks.storage).not.toHaveBeenCalled();});
+it("downloads only the stored output path and prevents public caching",async()=>{const response=await GET(request("?index=1&path=other-user/secret.jpg"),params());expect(response.status).toBe(200);expect(mocks.download).toHaveBeenCalledWith("actor/run/output-2.jpg");expect(response.headers.get("Cache-Control")).toBe("private, no-store");expect(response.headers.get("Content-Type")).toBe("image/jpeg");expect(await response.text()).toBe("jpeg-bytes");});
+it("returns the stored input image only after the same access checks",async()=>{expect((await GET(request("?variant=input"),params())).status).toBe(200);expect(mocks.download).toHaveBeenCalledWith("actor/run/input.jpg");});
+it("handles unavailable storage objects without revealing service errors",async()=>{mocks.download.mockResolvedValue({data:null,error:{message:"private backend details"}});const response=await GET(request(),params());expect(response.status).toBe(404);expect(await response.text()).toBe("Media unavailable");});
