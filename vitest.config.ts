@@ -1,4 +1,4 @@
 import { defineConfig } from "vitest/config";
 export default defineConfig({
-  test: { environment: "node", pool: "threads", maxWorkers: 1 },
+  test: { include: ["tests/**/*.test.{ts,tsx}"], environment: "node", pool: "threads", maxWorkers: 2 },
 });

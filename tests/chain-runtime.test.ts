@@ -9,7 +9,7 @@ function response(output: string, finishReason = "STOP") {
   return new Response(JSON.stringify({ candidates: [{ finishReason, content: { parts: [{ text: output }] } }] }), { status: 200 });
 }
 function setup() { vi.stubEnv("GEMINI_API_KEY", "test-only-key"); vi.stubEnv("GEMINI_MODEL", "gemini-2.5-flash"); }
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 it("feeds the image to each step, substitutes previous output once and uses configured caption count", async () => {
   setup();
@@ -60,4 +60,39 @@ it("does not call a provider for missing configuration or invalid inputs", async
   setup();
   await expect(runChain({ steps: [step], image: Buffer.alloc(0), context: "", captionCount: 5 })).rejects.toThrow("image");
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("retries one 503 with the same model, body and shared step deadline", async () => {
+  setup();
+  const timeout = vi.spyOn(AbortSignal, "timeout");
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response("Busy", { status: 503 })).mockResolvedValueOnce(response(JSON.stringify({ captions })));
+  vi.stubGlobal("fetch", fetcher);
+  const result = await runChain({ steps: [step], image: Buffer.from("image"), context: "", captionCount: 5 });
+  expect(result.captions).toEqual(captions);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][0]).toBe(fetcher.mock.calls[0][0]);
+  expect(fetcher.mock.calls[1][1].body).toBe(fetcher.mock.calls[0][1].body);
+  expect(fetcher.mock.calls[1][1].signal).toBe(fetcher.mock.calls[0][1].signal);
+  expect(timeout.mock.calls).toEqual([[180_000], [30_000]]);
+});
+
+it("reports persistent overload after exactly one retry", async () => {
+  setup();
+  const fetcher = vi.fn().mockImplementation(async () => new Response("secret provider internals", { status: 503 }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(runChain({ steps: [step], image: Buffer.from("image"), context: "", captionCount: 5 })).rejects.toThrow("temporarily overloaded");
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("aborts the retry delay when the original step deadline expires", async () => {
+  setup();
+  const total = new AbortController(), deadline = new AbortController();
+  vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(total.signal).mockReturnValueOnce(deadline.signal);
+  const fetcher = vi.fn().mockImplementation(async () => {
+    queueMicrotask(() => deadline.abort());
+    return new Response("Busy", { status: 503 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(runChain({ steps: [step], image: Buffer.from("image"), context: "", captionCount: 5 })).rejects.toThrow("timed out");
+  expect(fetcher).toHaveBeenCalledTimes(1);
 });

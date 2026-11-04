@@ -1,4 +1,5 @@
 import "server-only";
+import { setTimeout as delay } from "node:timers/promises";
 import { expandPrompt, MODEL_PATTERN, parseChainInput, validateCaptions, type ChainStep, type ChainResult } from "./chains";
 import { GenerationError } from "./generation-error";
 
@@ -37,13 +38,25 @@ export async function runChain(input: {
         ...(final ? { responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { captions: { type: "ARRAY", items: { type: "STRING" }, minItems: input.captionCount, maxItems: input.captionCount } }, required: ["captions"] } } : {}),
       },
     };
+    // A retry shares the original step and overall deadlines; overload must
+    // never extend a run's budget or restart already completed steps.
+    const signal = AbortSignal.any([totalSignal, AbortSignal.timeout(30_000)]);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    const options: RequestInit = {
+      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body),
+      cache: "no-store", signal,
+    };
     let response: Response;
     try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body),
-        cache: "no-store", signal: AbortSignal.any([totalSignal, AbortSignal.timeout(30_000)]),
-      });
+      response = await fetch(url, options);
+      if (response.status === 503) {
+        await response.body?.cancel();
+        await delay(800, undefined, { signal });
+        signal.throwIfAborted();
+        response = await fetch(url, options);
+      }
     } catch { throw new GenerationError(`Step ${i + 1} timed out or could not connect. Please try again.`); }
+    if (response.status === 503) throw new GenerationError("The AI provider is temporarily overloaded. Please try again shortly.");
     if (!response.ok) throw new GenerationError(response.status === 429 ? "The AI provider is temporarily at its limit. Try again shortly." : `The provider could not run step ${i + 1}. Check its model and try again.`);
     try {
       const raw = await response.text();
