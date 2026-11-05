@@ -128,3 +128,19 @@ it("waits for successful generation and keeps the result milestone when paused d
   fireEvent.click(screen.getByRole("button", { name: "Resume walkthrough" }));
   expect(screen.getByRole("button", { name: "Finish walkthrough ✓" })).toBeTruthy();
 });
+
+it("attaches the highlight to the control and cleans up on pause", async () => {
+  await start();
+  const name = screen.getByLabelText("Chain name");
+  expect(name.classList.contains("guide-target")).toBe(true);
+  expect(document.querySelector(".guide-backdrop")).toBeTruthy();
+  fireEvent.scroll(window);
+  expect(name.classList.contains("guide-target")).toBe(true);
+  fireEvent.change(name, { target: { value: "Scroll test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue →" }));
+  expect(name.classList.contains("guide-target")).toBe(false);
+  expect(document.querySelector('[data-guide="prompt"]')?.classList.contains("guide-target")).toBe(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(document.querySelector(".guide-target")).toBeNull();
+  expect(document.querySelector(".guide-backdrop")).toBeNull();
+});

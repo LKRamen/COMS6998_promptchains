@@ -80,7 +80,6 @@ export default function ChainWalkthrough({ guide, canContinue, onContinue, onBac
   onSuggestion?: () => void; error: string; busy: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
-  const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const stage = guide.progress?.stage ?? 0;
   const lesson = lessons[stage];
   const { active, pause } = guide;
@@ -90,18 +89,13 @@ export default function ChainWalkthrough({ guide, canContinue, onContinue, onBac
     if (!target) return;
     const previousDescription = target.getAttribute("aria-describedby");
     target.setAttribute("aria-describedby", "guide-explanation");
+    target.classList.add("guide-target");
     let frame = 0;
-    const measure = () => {
-      const bounds = target.getBoundingClientRect();
-      setRect({ top: bounds.top - 6, left: Math.max(4, bounds.left - 6), width: Math.min(bounds.width + 12, window.innerWidth - 8), height: bounds.height + 12 });
-    };
-    const position = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
     const fitTarget = () => {
       const bounds = target.getBoundingClientRect();
       const reserved = (panel.current?.getBoundingClientRect().height ?? 280) + 36;
       const available = window.innerHeight - reserved;
       if (bounds.top < 40 || bounds.bottom > available) window.scrollBy({ top: bounds.top - Math.max(32, (available - bounds.height) / 2), behavior: "instant" });
-      measure();
     };
     const resized = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fitTarget); };
     const initial = requestAnimationFrame(() => {
@@ -109,14 +103,13 @@ export default function ChainWalkthrough({ guide, canContinue, onContinue, onBac
       else panel.current?.focus({ preventScroll: true });
       fitTarget();
     });
-    const observer = new ResizeObserver(position);
+    const observer = new ResizeObserver(resized);
     observer.observe(target);
     if (panel.current) observer.observe(panel.current);
-    window.addEventListener("scroll", position, true);
     window.addEventListener("resize", resized);
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") pause(); };
     window.addEventListener("keydown", escape);
-    return () => { if (previousDescription) target.setAttribute("aria-describedby", previousDescription); else target.removeAttribute("aria-describedby"); cancelAnimationFrame(initial); cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener("scroll", position, true); window.removeEventListener("resize", resized); window.removeEventListener("keydown", escape); };
+    return () => { target.classList.remove("guide-target"); if (previousDescription) target.setAttribute("aria-describedby", previousDescription); else target.removeAttribute("aria-describedby"); cancelAnimationFrame(initial); cancelAnimationFrame(frame); observer.disconnect(); window.removeEventListener("resize", resized); window.removeEventListener("keydown", escape); };
   }, [active, lesson, pause]);
 
   if (guide.welcome) return <section className="guide-welcome" aria-labelledby="guide-welcome-title">
@@ -125,7 +118,7 @@ export default function ChainWalkthrough({ guide, canContinue, onContinue, onBac
   </section>;
   if (!guide.active || !lesson) return <div className="guide-launch"><button type="button" className="text-link text-button" onClick={guide.progress && guide.progress.stage >= 0 ? guide.resume : guide.start}>{guide.progress && guide.progress.stage >= 0 ? "Resume walkthrough" : "Show me how to build a pipeline"}</button></div>;
   return <>
-    {rect && <div className="guide-spotlight" aria-hidden="true" style={rect}><span>{stage + 1}</span></div>}
+    <div className="guide-backdrop" aria-hidden="true" />
     <aside ref={panel} tabIndex={-1} className="guide-panel" aria-label="Live pipeline walkthrough">
       <div className="guide-panel-top"><span className="eyebrow">LIVE WALKTHROUGH · {stage + 1} / {lessons.length}</span><button type="button" className="text-button" onClick={guide.pause}>Pause / exit</button></div>
       <div className="guide-progress" aria-hidden="true">{lessons.map((_,i)=><i key={i} className={i<=stage?"reached":""}/>)}</div>
