@@ -9,6 +9,7 @@ An independent, superadmin-only prompt-chain studio built for COMS6998.
 - Run an uploaded image through 1–6 ordered Gemini prompts. Each step receives the previous output. The final step produces 1–10 captions, rendered as JPEG media.
 - Browse saved media and inspect the original image and each step's output by chain/run.
 - Light, dark and system appearance, persisted in the browser.
+- A live first-pipeline walkthrough spotlights real controls, explains the handoff between steps, and waits for actual edits, additions, a successful save, image selection and generation results. Skip before starting, pause with Escape, or resume from the editor. Optional suggested prompts only fill the draft when clicked. Tutorial progress is account-scoped in this browser; unsaved drafts and selected files are not persisted across reloads.
 - Google OAuth and a fresh `profiles.is_superadmin` check protect pages, actions, media, and database RPCs.
 
 ## Run locally
